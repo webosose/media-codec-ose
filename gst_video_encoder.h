@@ -38,6 +38,8 @@ class GstVideoEncoder : public VideoEncoder {
   bool Deinit() override;
   MCIL_MEDIA_STATUS_T Feed(const uint8_t* bufferPtr, size_t bufferSize) override;
 
+  bool UpdateEncodingParams(const ENCODING_PARAMS_T* properties) override;
+
   static gboolean HandleBusMessage(
       GstBus *bus_, GstMessage *message, gpointer user_data);
 
@@ -62,6 +64,8 @@ class GstVideoEncoder : public VideoEncoder {
   GstCaps *caps_YUY2_ = nullptr;
   GstCaps *caps_NV12_ = nullptr;
   CALLBACK_T cbFunction_ = nullptr;
+
+  int32_t bitrate_ = 0;
 };
 
 }  // namespace encoder

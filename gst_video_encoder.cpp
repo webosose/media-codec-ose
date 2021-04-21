@@ -44,6 +44,7 @@ const std::string kFormatYUV = "YUY2";
 #define BUFFER_MIN_PERCENT 50
 #define MEDIA_CHANNEL_MAX  2
 
+#define V4L2ENCODER
 
 namespace mcil {
 
@@ -78,6 +79,7 @@ bool GstVideoEncoder::Init(const ENCODER_INIT_DATA_T* loadData,
   }
 
   VideoEncoder::Init(loadData, new_frame_cb);
+  bitrate_ = 0;
 
   return true;
 }
@@ -120,11 +122,33 @@ MCIL_MEDIA_STATUS_T GstVideoEncoder::Feed(const uint8_t* bufferPtr,
   return MCIL_MEDIA_OK;
 }
 
+bool GstVideoEncoder::UpdateEncodingParams(const ENCODING_PARAMS_T* properties) {
+  if (encoder_ && properties->bitRate > 0 && bitrate_ != properties->bitRate) {
+    MCIL_INFO_PRINT("%d %s : video_bitrate=%d", __LINE__, __FUNCTION__, properties->bitRate);
+#if defined(V4L2ENCODER)
+    GstStructure* extraCtrls = gst_structure_new ("extra-controls",
+                                                  "video_bitrate", G_TYPE_INT, properties->bitRate,
+                                                  NULL);
+    g_object_set(G_OBJECT(encoder_), "extra-controls", extraCtrls, NULL);
+#else
+    g_object_set(G_OBJECT(encoder_), "target-bitrate", properties->bitRate, NULL);
+#endif
+    bitrate_ = properties->bitRate;
+  }
+  return true;
+}
+
 bool GstVideoEncoder::CreateEncoder(MCIL_VIDEO_CODEC codecType) {
   MCIL_INFO_PRINT("%d %s", __LINE__, __FUNCTION__);
 
   if (codecType == MCIL_VIDEO_CODEC_H264) {
+#if defined(V4L2ENCODER)
+    encoder_ = gst_element_factory_make ("v4l2h264enc", "encoder");
+    MCIL_INFO_PRINT("use v4l2h264enc");
+#else
     encoder_ = gst_element_factory_make ("omxh264enc", "encoder");
+    MCIL_INFO_PRINT("use omxh264enc");
+#endif
   } else if (codecType == MCIL_VIDEO_CODEC_VP8) {
     encoder_ = gst_element_factory_make ("omxvp8enc", "encoder");
   } else {
@@ -169,6 +193,9 @@ bool GstVideoEncoder::LinkElements(const ENCODER_INIT_DATA_T* loadData) {
                                    NULL);
   g_object_set(G_OBJECT(filter_YUY2_), "caps", caps_YUY2_, NULL);
 
+#if defined(V4L2ENCODER)
+  MCIL_INFO_PRINT("Do not use NV12 caps filter for V4L2");
+#else
   filter_NV12_ = gst_element_factory_make("capsfilter", "filter-NV");
   if (!filter_NV12_) {
     MCIL_INFO_PRINT("filter_ element creation failed.");
@@ -179,6 +206,7 @@ bool GstVideoEncoder::LinkElements(const ENCODER_INIT_DATA_T* loadData) {
                                    "format", G_TYPE_STRING, "NV12",
                                    NULL);
   g_object_set(G_OBJECT(filter_NV12_), "caps", caps_NV12_, NULL);
+#endif
 
   converter_ = gst_element_factory_make("videoconvert", "converted");
   if (!converter_) {
@@ -198,7 +226,11 @@ bool GstVideoEncoder::LinkElements(const ENCODER_INIT_DATA_T* loadData) {
     g_object_set(G_OBJECT(parse_), "format", 2, NULL);
   }
 
+#if defined(V4L2ENCODER)
+  gst_bin_add_many(GST_BIN(pipeline_), source_, filter_YUY2_, parse_, converter_, encoder_, sink_, NULL);
+#else
   gst_bin_add_many(GST_BIN(pipeline_), source_, filter_YUY2_, parse_, converter_, filter_NV12_, encoder_, sink_, NULL);
+#endif
   MCIL_INFO_PRINT(" GstVideoEncoder elements added to bin  \n ");
 
   if (TRUE != gst_element_link(source_, filter_YUY2_)) {
@@ -216,6 +248,12 @@ bool GstVideoEncoder::LinkElements(const ENCODER_INIT_DATA_T* loadData) {
     return false;
   }
 
+#if defined(V4L2ENCODER)
+  if (TRUE != gst_element_link(converter_, encoder_)) {
+    MCIL_INFO_PRINT ("elements could not be linked - converter_ & encoder_ \n");
+    return false;
+  }
+#else
   if (TRUE != gst_element_link(converter_, filter_NV12_)) {
     MCIL_INFO_PRINT ("elements could not be linked - converter_ & filter_NV12_ \n");
     return false;
@@ -225,6 +263,7 @@ bool GstVideoEncoder::LinkElements(const ENCODER_INIT_DATA_T* loadData) {
     MCIL_INFO_PRINT ("elements could not be linked - filter_NV12_ & encoder_ \n");
     return false;
   }
+#endif
 
   if (TRUE != gst_element_link(encoder_, sink_)) {
     MCIL_INFO_PRINT ("elements could not be linked - encoder_ & sink_ \n");
