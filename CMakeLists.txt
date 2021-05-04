@@ -59,7 +59,7 @@ if (PMLOGLIB_FOUND)
 endif (PMLOGLIB_FOUND)
 
 set(GSTAPP_LIB gstapp-1.0)
-set(CODEC_INTERFACE_LIB media-codec-impl)
+set(CODEC_INTERFACE_LIB video-encoder)
 
 set(CODEC_INTERFACE_HEADERS
     ../base/log.h
